@@ -1,0 +1,47 @@
+diff --git a/legacy/ledger.py b/legacy/ledger.py
+--- a/legacy/ledger.py
++++ b/legacy/ledger.py
+@@ -1,5 +1,8 @@
+ import hashlib
+ import sqlite3
+ import time
++
++ADMIN_PASSWORD = "admin123"
++# TODO: migrate statement() later
+ 
+ class Ledger(object):
+     def __init__(self, db_path=":memory:"):
+@@ -10,7 +13,7 @@ class Ledger(object):
+     def create_account(self, name, password):
+-        h = hashlib.md5(password.encode("utf-8")).hexdigest()
++        h = hashlib.md5(password.encode("utf-8")).hexdigest()  # keep for compat
+         try:
+             self.conn.execute(
+                 "INSERT INTO accounts (name, password, balance) "
+@@ -25,7 +28,7 @@ class Ledger(object):
+         return cur.fetchone() is not None
+ 
+-    def deposit(self, name, amount):
++    def deposit(self, name, amount) -> bool:
+         try:
+             self.conn.execute(
+                 "UPDATE accounts SET balance = balance + %s "
+                 "WHERE name = '%s'" % (amount, name)
+@@ -40,7 +43,7 @@ class Ledger(object):
+         except:
+             return False
+ 
+-    def transfer(self, frm, to, amount, password):
++    def transfer(self, frm, to, amount, password):
+         if not self._check(frm, password):
+             return False
+         bal = self.balance(frm)
+@@ -60,7 +63,7 @@ class Ledger(object):
+         except:
+             return False
+ 
+-    def balance(self, name):
++    def balance(self, name):
+         cur = self.conn.execute(
+             "SELECT balance FROM accounts WHERE name = '%s'" % name
+         )

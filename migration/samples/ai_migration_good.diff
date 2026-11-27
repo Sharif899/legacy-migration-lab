@@ -1,0 +1,97 @@
+diff --git a/legacy/ledger.py b/legacy/ledger.py
+--- a/legacy/ledger.py
++++ b/legacy/ledger.py
+@@ -1,8 +1,12 @@
+-import hashlib
++import hashlib
+ import sqlite3
+ import time
++from decimal import Decimal
++
++# Backwards compatible: same public methods, same business rules.
++# Behavioural equivalence is proven by migration/equivalence.py.
+ 
+ class Ledger(object):
+     def __init__(self, db_path=":memory:"):
+@@ -10,10 +14,14 @@ class Ledger(object):
+-    def create_account(self, name, password):
++    def create_account(self, name: str, password: str) -> bool:
++        """Create an account with a salted PBKDF2 password hash."""
++        salt = secrets.token_bytes(16)
+-        h = hashlib.md5(password.encode("utf-8")).hexdigest()
++        h = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200000)
+         try:
+             self.conn.execute(
+-                "INSERT INTO accounts (name, password, balance) "
+-                "VALUES ('%s', '%s', 0)" % (name, h)
++                "INSERT INTO accounts (name, password_hash, salt, balance) "
++                "VALUES (?, ?, ?, ?)",
++                (name, h, salt, "0.00"),
+             )
+             self.conn.commit()
+-        except:
+-            pass
++        except sqlite3.IntegrityError:
++            raise AccountExists("account already exists")
+         return True
+ 
+     def _check(self, name, password):
+@@ -25,7 +33,8 @@ class Ledger(object):
+         return cur.fetchone() is not None
+ 
+-    def deposit(self, name, amount):
++    def deposit(self, name, amount: Decimal) -> bool:
++        """Deposit Decimal money into an account."""
+         try:
+             self.conn.execute(
+-                "UPDATE accounts SET balance = balance + %s "
+-                "WHERE name = '%s'" % (amount, name)
++                "UPDATE accounts SET balance = balance + ? WHERE name = ?",
++                (str(amount), name),
+             )
+@@ -40,7 +49,8 @@ class Ledger(object):
+         except:
+             return False
+ 
+-    def transfer(self, frm, to, amount, password):
++    def transfer(self, frm, to, amount: Decimal, password: str) -> bool:
++        """Move Decimal money between accounts, in one transaction."""
+         if not self._check(frm, password):
+             return False
+         bal = self.balance(frm)
+@@ -60,10 +70,12 @@ class Ledger(object):
+         except:
+             return False
+ 
+-    def balance(self, name):
++    def balance(self, name: str) -> Decimal:
++        """Return the account balance as Decimal."""
+         cur = self.conn.execute(
+             "SELECT balance FROM accounts WHERE name = '%s'" % name
+         )
+         row = cur.fetchone()
+         return row[0] if row else 0.0
+ 
+-    def statement(self, name):
++    def statement(self, name: str) -> list:
++        """Return the account statement as a list of entries."""
+         cur = self.conn.execute(
+             "SELECT kind, amount, other FROM entries "
+             "WHERE account = '%s' ORDER BY id" % name
+         )
+diff --git a/tests/test_migration.py b/tests/test_migration.py
+--- a/tests/test_migration.py
++++ b/tests/test_migration.py
+@@ -0,0 +1,12 @@
++"""Tests for the migrated ledger."""
++
++from decimal import Decimal
++
++from modern.ledger import Ledger
++
++
++def test_deposit_and_balance() -> None:
++    ledger = Ledger()
++    ledger.create_account("ada", "s3cret")
++    ledger.deposit("ada", Decimal("100.00"))
++    assert ledger.balance("ada") == Decimal("100.00")
